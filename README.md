@@ -20,7 +20,7 @@ Report the quality of PCA (what goes wrong; what the false positives are) and Eu
 * **Color Scale:** Implement a color scale useful for representing the positive or negative falsity index of the points.
 * **Quality Metrics:** Include metrics such as a global score representing the sum of the involved points.
 * **Initial Assessment:** Provide a preliminary judgment on the dataset (e.g., "80% of the points match"). 
-* **Defining Weights:** False positives and negatives (blue/red) must be given an appropriate **definition**. You must use metrics that are not simply "on/off" but instead consider their weight (i.e., *how much* of a false positive or negative they are), or base it on the first letter of the name.
+* **Defining Weights:** False positives and negatives (blue/red) must be given an appropriate **definition**. You must use metrics that are not simply "on/off" but instead consider their weight (i.e., *how much* of a false positive or negative they are).
 
 ### 2. Labels, K-Means Clustering, and Discrepancies
 Introduce labels (abstract ones, like wine producers, and data-dependent ones). 
