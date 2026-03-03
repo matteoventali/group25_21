@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>Visual Analytics: PCA vs MDS Euclideo</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f9f9f9;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 { margin-bottom: 5px; color: #333; }
+        p.subtitle { color: #666; margin-bottom: 30px; max-width: 800px; text-align: center; }
+
+        /* Contenitore dei grafici affiancati */
+        .dashboard {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 30px;
+            justify-content: center;
+        }
+
+        .chart-container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            padding: 20px;
+            text-align: center;
+        }
+
+        h3 { margin-top: 0; color: #444; }
+
+        /* Stile della Legenda */
+        .legend-box {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+            background: white;
+            padding: 10px 20px;
+            border-radius: 50px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            font-size: 14px;
+            font-weight: bold;
+        }
+        
+        .gradient-bar {
+            width: 300px;
+            height: 12px;
+            /* Gradiente: Blu (Negativo/Compresso) -> Bianco (Zero) -> Rosso (Positivo/Stirato) */
+            background: linear-gradient(to right, #2166ac, #f7f7f7, #b2182b);
+            border-radius: 6px;
+            border: 1px solid #ccc;
+        }
+
+        /* Stile dei Punti */
+        circle {
+            stroke: #333;
+            stroke-width: 0.5px;
+            cursor: crosshair;
+            transition: r 0.1s ease-out, stroke-width 0.1s;
+        }
+
+        /* Classi per l'interazione (Linking) */
+        circle.hovered {
+            stroke: #000;
+            stroke-width: 2.5px;
+            r: 10px; /* Ingrandisce il punto */
+            z-index: 1000;
+        }
+
+        circle.dimmed {
+            opacity: 0.15; /* Sbiadisce gli altri */
+        }
+
+        /* Tooltip */
+        #tooltip {
+            position: absolute;
+            opacity: 0;
+            background: rgba(30, 30, 30, 0.9);
+            color: white;
+            padding: 10px;
+            border-radius: 6px;
+            pointer-events: none;
+            font-size: 13px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            max-width: 200px;
+            line-height: 1.4;
+        }
+        
+        .metric-label {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
+
+    </style>
+</head>
+<body>
+
+    <h1>Analisi della Distorsione: PCA vs MDS</h1>
+    <p class="subtitle">
+        Confronto della fedeltà delle proiezioni rispetto alla distanza Euclidea originale.<br>
+        Il colore indica l'errore puntuale di ogni dato.
+    </p>
+
+    <div class="legend-box">
+        <span style="color: #2166ac;">Falsi Positivi<br><small>(Compressi)</small></span>
+        <div class="gradient-bar"></div>
+        <span style="color: #b2182b;">Falsi Negativi<br><small>(Stirati)</small></span>
+    </div>
+
+    <div class="dashboard">
+        <div class="chart-container">
+            <h3>PCA (Principal Component Analysis)</h3>
+            <div id="chart-pca"></div>
+            <div class="metric-label">Ottimizza la varianza globale</div>
+        </div>
+
+        <div class="chart-container">
+            <h3>MDS (Multidimensional Scaling)</h3>
+            <div id="chart-mds"></div>
+            <div class="metric-label">Ottimizza le distanze locali</div>
+        </div>
+    </div>
+
+    <div id="tooltip"></div>
+
+<script>
+    // 1. CONFIGURAZIONE GRAFICA
+    const margin = {top: 20, right: 20, bottom: 40, left: 40},
+          width = 500 - margin.left - margin.right,
+          height = 500 - margin.top - margin.bottom;
+
+    // 2. CARICAMENTO DATI
+    d3.json("wine_data.json").then(function(data) {
+
+        console.log("Dati caricati:", data.length);
+
+        // 3. SETUP SCALA COLORI (Cuore della Visual Analytics)
+        // Usiamo una scala divergente "RdBu" (Red-Blue).
+        // D3 interpolateRdBu va da Rosso (0) a Blu (1).
+        // Noi vogliamo: 
+        // - Score Negativi (Compressi) -> BLU (quindi valori alti nella scala colore)
+        // - Score Positivi (Stirati) -> ROSSO (quindi valori bassi nella scala colore)
+        
+        // Cerchiamo il massimo errore assoluto per centrare la scala su 0
+        const maxScorePCA = d3.max(data, d => Math.abs(d.score_pca));
+        const maxScoreMDS = d3.max(data, d => Math.abs(d.score_mds));
+        const maxLimit = Math.max(maxScorePCA, maxScoreMDS) || 0.2; // Fallback a 0.2 se piatto
+
+        // Creiamo la scala: Dominio invertito [max, -max] per mappare Positivo->Rosso, Negativo->Blu
+        const colorScale = d3.scaleSequential(d3.interpolateRdBu)
+                             .domain([maxLimit, -maxLimit]); 
+
+        // 4. FUNZIONE GENERICA PER DISEGNARE GLI SCATTERPLOT
+        function drawScatter(selector, xProp, yProp, scoreProp) {
+            
+            const svg = d3.select(selector)
+                .append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom)
+                .append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            // Scale X e Y
+            const x = d3.scaleLinear()
+                .domain(d3.extent(data, d => d[xProp])).nice()
+                .range([0, width]);
+
+            const y = d3.scaleLinear()
+                .domain(d3.extent(data, d => d[yProp])).nice()
+                .range([height, 0]);
+
+            // Assi
+            svg.append("g")
+                .attr("transform", `translate(0,${height})`)
+                .call(d3.axisBottom(x).ticks(5));
+            
+            svg.append("g")
+                .call(d3.axisLeft(y).ticks(5));
+
+            // Disegno dei Punti
+            svg.selectAll("circle")
+                .data(data)
+                .enter()
+                .append("circle")
+                .attr("cx", d => x(d[xProp]))
+                .attr("cy", d => y(d[yProp]))
+                .attr("r", 6)
+                // Colore basato sullo Score specifico (PCA o MDS)
+                .attr("fill", d => colorScale(d[scoreProp])) 
+                // Aggiungiamo una classe con l'ID per selezionarli facilmente dopo
+                .attr("class", d => "dot-" + d.id) 
+                
+                // --- INTERATTIVITÀ ---
+                .on("mouseover", function(event, d) {
+                    
+                    // 1. Evidenzia questo punto e il suo gemello nell'altro grafico
+                    d3.selectAll(".dot-" + d.id)
+                      .classed("hovered", true)
+                      .raise(); // Porta il punto in primo piano
+
+                    // 2. Sbiadisci tutti gli altri punti (Focus+Context)
+                    d3.selectAll("circle:not(.dot-" + d.id + ")")
+                      .classed("dimmed", true);
+
+                    // 3. Mostra Tooltip
+                    const tooltip = d3.select("#tooltip");
+                    const score = d[scoreProp].toFixed(4);
+                    let tipoErrore = "Neutro";
+                    if(score < -0.05) tipoErrore = "Compresso (Falso Positivo)";
+                    if(score > 0.05) tipoErrore = "Stirato (Falso Negativo)";
+
+                    tooltip.transition().duration(200).style("opacity", 1);
+                    tooltip.html(`
+                        <strong>ID:</strong> ${d.id}<br>
+                        <strong>Target:</strong> ${d.class_name}<br>
+                        <hr style="margin:5px 0; border:0; border-top:1px solid #555;">
+                        <strong>Distorsione:</strong> ${score}<br>
+                        <em style="color:#aaa;">${tipoErrore}</em>
+                    `)
+                    .style("left", (event.pageX + 15) + "px")
+                    .style("top", (event.pageY - 28) + "px");
+                })
+                .on("mouseout", function(event, d) {
+                    // Reset totale
+                    d3.selectAll("circle").classed("hovered", false).classed("dimmed", false);
+                    d3.select("#tooltip").transition().duration(500).style("opacity", 0);
+                });
+        }
+
+        // 5. DISEGNA I DUE GRAFICI
+        drawScatter("#chart-pca", "pca_x", "pca_y", "score_pca");
+        drawScatter("#chart-mds", "mds_x", "mds_y", "score_mds");
+
+    }).catch(err => {
+        console.error("Errore caricamento JSON:", err);
+        d3.select("body").append("h2")
+          .style("color", "red")
+          .text("Errore! Impossibile caricare wine_data.json. Hai avviato 'python -m http.server'?");
+    });
+
+</script>
+</body>
+</html>
