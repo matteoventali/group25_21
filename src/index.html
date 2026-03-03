@@ -16,7 +16,7 @@
         /* CONTROLLI (I Bottoni) */
         .controls { display: flex; gap: 10px; background: #ecf0f1; padding: 5px; border-radius: 8px; }
         button { border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem; transition: all 0.2s; }
-        button.active { background: #3498db; color: white; shadow: 0 2px 5px rgba(0,0,0,0.2); }
+        button.active { background: #3498db; color: white; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
         button:not(.active) { background: transparent; color: #7f8c8d; }
         button:not(.active):hover { background: #e0e0e0; color: #333; }
 
@@ -24,7 +24,8 @@
         .legend-container { display: flex; align-items: center; gap: 15px; font-size: 0.85rem; margin-top: 5px;}
         .legend-box { display: flex; align-items: center; gap: 5px; }
         .color-dot { width: 12px; height: 12px; border-radius: 50%; }
-        .gradient-bar { width: 150px; height: 10px; background: linear-gradient(to right, #0571b0, #f7f7f7, #ca0020); border-radius: 5px; border: 1px solid #ccc; }
+        /* Modificato il gradiente per riflettere Rosso (Negativo) -> Grigio (Neutro) -> Blu (Positivo) */
+        .gradient-bar { width: 150px; height: 10px; background: linear-gradient(to right, #ca0020, #f7f7f7, #0571b0); border-radius: 5px; border: 1px solid #ccc; }
 
         /* DASHBOARD */
         .dashboard { flex-grow: 1; display: flex; justify-content: center; align-items: center; gap: 30px; padding: 20px; }
@@ -55,9 +56,9 @@
             </div>
             
             <div id="legend-error" class="legend-container">
-                <span>Compresso (FP)</span>
+                <span>Falsi Negativi (Strappati)</span>
                 <div class="gradient-bar"></div>
-                <span>Stirato (FN)</span>
+                <span>Falsi Positivi (Schiacciati)</span>
             </div>
             <div id="legend-class" class="legend-container" style="display: none;">
                 </div>
@@ -79,22 +80,25 @@
 
 <script>
     let globalData = [];
-    let currentMode = 'error'; // 'error' o 'class'
+    let currentMode = 'error';
     
-    // 1. SCALE COLORI
-    // Scala per Errore (Divergente)
-    const colorScaleError = d3.scaleThreshold()
-        .domain([-0.15, -0.05, 0.05, 0.15]) 
-        .range(["#0571b0", "#92c5de", "#e0e0e0", "#f4a582", "#ca0020"]);
-
-    // Scala per Classi (Categorica - Colori distinti per vedere i cluster)
+    // Dichiarazione variabili per le scale
+    let colorScaleError;
     const colorScaleClass = d3.scaleOrdinal(d3.schemeCategory10);
 
-    // Caricamento
+    // Caricamento Dati
     d3.json("wine_data.json").then(function(data) {
         globalData = data;
         
-        // Setup Legenda Classi
+        // --- 1. SETUP SCALA COLORI DIVERGENTE DINAMICA ---
+        // Troviamo l'errore massimo in assoluto per creare una scala simmetrica
+        const maxAbsScore = d3.max(data, d => Math.max(Math.abs(d.score_pca), Math.abs(d.score_mds)));
+        
+        colorScaleError = d3.scaleLinear()
+            .domain([-maxAbsScore, 0, maxAbsScore]) // Da negativo max (Rosso) a 0 (Grigio) a positivo max (Blu)
+            .range(["#ca0020", "#f7f7f7", "#0571b0"]);
+
+        // --- 2. SETUP LEGENDA CLASSI ---
         const classes = [...new Set(data.map(d => d.class_name))].sort();
         const legendClassDiv = d3.select("#legend-class");
         classes.forEach(c => {
@@ -104,77 +108,55 @@
         });
 
         drawCharts();
-    }).catch(err => alert("Errore caricamento JSON. Controlla console."));
+    }).catch(err => alert("Errore caricamento JSON. Hai lanciato il server locale (es. python -m http.server)?"));
 
     function setMode(mode) {
         currentMode = mode;
-        // Aggiorna Bottoni
         d3.selectAll("button").classed("active", false);
         d3.select("#btn-" + mode).classed("active", true);
         
-        // Aggiorna Legende
         d3.select("#legend-error").style("display", mode === 'error' ? 'flex' : 'none');
         d3.select("#legend-class").style("display", mode === 'class' ? 'flex' : 'none');
 
-        // Aggiorna Colori Grafici con transizione
         updateColors();
     }
 
     function updateColors() {
-        d3.selectAll("circle")
-            .transition().duration(800)
-            .attr("fill", d => {
-                if (currentMode === 'error') {
-                    // Se siamo nel grafico PCA usa score_pca, se MDS usa score_mds
-                    // Trucco: leggiamo l'ID del genitore per capire in quale grafico siamo
-                    // Ma per semplicità qui ricalcoliamo o usiamo una logica generica
-                    // Purtroppo D3 selectAll è piatto. 
-                    // Soluzione: Ridisegnamo tutto o usiamo attributo custom.
-                    return null; // Lasciamo fare a drawCharts() o logica specifica sotto
-                } else {
-                    return colorScaleClass(d.class_name);
-                }
-            });
+        d3.select("#chart-pca").selectAll("circle")
+            .transition().duration(500)
+            .attr("fill", d => currentMode === 'error' ? colorScaleError(d.score_pca) : colorScaleClass(d.class_name));
             
-        // Rilanciamo il draw per fare prima (gestisce logica specifica PCA/MDS)
-        drawCharts(true); 
+        d3.select("#chart-mds").selectAll("circle")
+            .transition().duration(500)
+            .attr("fill", d => currentMode === 'error' ? colorScaleError(d.score_mds) : colorScaleClass(d.class_name));
     }
 
-    function drawCharts(updateOnly = false) {
-        if (!updateOnly) {
-            drawScatter("#chart-pca", "pca_x", "pca_y", "score_pca", "container-pca");
-            drawScatter("#chart-mds", "mds_x", "mds_y", "score_mds", "container-mds");
-        } else {
-            // Aggiornamento solo colori
-            d3.select("#chart-pca").selectAll("circle")
-                .transition().duration(500)
-                .attr("fill", d => currentMode === 'error' ? colorScaleError(d.score_pca) : colorScaleClass(d.class_name));
-                
-            d3.select("#chart-mds").selectAll("circle")
-                .transition().duration(500)
-                .attr("fill", d => currentMode === 'error' ? colorScaleError(d.score_mds) : colorScaleClass(d.class_name));
-        }
+    function drawCharts() {
+        drawScatter("#chart-pca", "pca_x", "pca_y", "score_pca", "container-pca");
+        drawScatter("#chart-mds", "mds_x", "mds_y", "score_mds", "container-mds");
     }
 
     function drawScatter(selector, xProp, yProp, scoreProp, containerId) {
         const container = document.getElementById(containerId);
-        const w = container.clientWidth - 40;
-        const h = container.clientHeight - 60; // Spazio per titolo
+        // Utilizziamo getBoundingClientRect per dimensioni esatte e stabili
+        const rect = container.getBoundingClientRect();
+        const w = rect.width - 40;
+        const h = rect.height - 60; 
         
-        // Pulisci se esiste
         d3.select(selector).html("");
 
-        const svg = d3.select(selector).append("svg").attr("width", w).attr("height", h);
+        // Imposta overflow visible sull'SVG per evitare tagli sui bordi
+        const svg = d3.select(selector).append("svg")
+            .attr("width", w)
+            .attr("height", h)
+            .style("overflow", "visible"); 
         
-        // Scale
         const x = d3.scaleLinear().domain(d3.extent(globalData, d => d[xProp])).nice().range([30, w-20]);
         const y = d3.scaleLinear().domain(d3.extent(globalData, d => d[yProp])).nice().range([h-30, 20]);
 
-        // Assi
         svg.append("g").attr("transform", `translate(0,${h-30})`).call(d3.axisBottom(x).ticks(5));
         svg.append("g").attr("transform", `translate(30,0)`).call(d3.axisLeft(y).ticks(5));
 
-        // Punti
         svg.selectAll("circle")
             .data(globalData)
             .enter().append("circle")
@@ -184,17 +166,16 @@
             .attr("fill", d => currentMode === 'error' ? colorScaleError(d[scoreProp]) : colorScaleClass(d.class_name))
             .attr("class", d => "dot-" + d.id)
             .on("mouseover", function(event, d) {
-                // Brushing
                 d3.selectAll(".dot-" + d.id).classed("hovered", true).raise();
                 d3.selectAll("circle:not(.dot-" + d.id + ")").classed("dimmed", true);
 
-                // Tooltip
                 const t = d3.select("#tooltip");
                 t.style("opacity", 1);
+                // Il punteggio è ora un intero (differenza di ranking), rimosso .toFixed(3)
                 t.html(`
                     <strong style="color:yellow">${d.class_name}</strong><br>
                     ID: ${d.id}<br>
-                    Err: ${d[scoreProp].toFixed(3)}
+                    Indice Errore: ${d[scoreProp].toFixed(0)}
                 `)
                 .style("left", event.pageX + "px")
                 .style("top", event.pageY + "px");
@@ -204,6 +185,9 @@
                 d3.select("#tooltip").style("opacity", 0);
             });
     }
+
+    // Ridisegna se la finestra cambia dimensione
+    window.addEventListener('resize', drawCharts);
 </script>
 </body>
 </html>

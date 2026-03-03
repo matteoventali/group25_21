@@ -8,7 +8,7 @@ The main goal is to evaluate the **fidelity of PCA** (assessment and judgment) w
 ---
 
 ## 📊 Dataset
-The project uses the **Wine dataset** (already seen in class).
+The project uses the **Wine dataset**.
 
 ---
 
