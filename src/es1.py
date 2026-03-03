@@ -1,4 +1,5 @@
 import json
+import os
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
@@ -9,8 +10,10 @@ from sklearn.metrics import euclidean_distances
 # ==========================================
 # 1. CONFIGURAZIONE UTENTE
 # ==========================================
-CSV_FILENAME = '/home/matteo/Universita/Visual_Analytics/group25_21/dataset/wine.csv'  # <--- Inserisci qui il nome del tuo file
-TARGET_COLUMN = None       # <--- Inserisci il nome della colonna che contiene le etichette/classi
+# Percorsi relativi alla posizione di questo file
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CSV_FILENAME = os.path.join(SCRIPT_DIR, '../dataset/wine.csv')  # <--- Inserisci qui il nome del tuo file
+TARGET_COLUMN = 'Producer'       # <--- Inserisci il nome della colonna che contiene le etichette/classi
                                #      (Se non ce l'hai, lascia una stringa vuota "")
 
 # ==========================================
@@ -56,7 +59,7 @@ pca = PCA(n_components=2)
 X_pca = pca.fit_transform(X_scaled)
 
 print("Calcolo MDS (potrebbe richiedere tempo)...")
-mds = MDS(n_components=2, dissimilarity='euclidean', random_state=42, normalized_stress='auto')
+mds = MDS(n_components=2, dissimilarity='euclidean', random_state=42, normalized_stress='auto', n_init=4)
 X_mds = mds.fit_transform(X_scaled)
 
 # ==========================================
@@ -99,7 +102,7 @@ for i in range(len(X)):
         "class_name": class_names[i] # Usa le etichette dal CSV
     })
 
-OUTPUT_FILE = '/home/matteo/Universita/Visual_Analytics/group25_21/dataset/wine_data.json' # Mantengo lo stesso nome così l'HTML funziona senza modifiche
+OUTPUT_FILE = os.path.join(SCRIPT_DIR, '../dataset/wine_data.json') # Mantengo lo stesso nome così l'HTML funziona senza modifiche
 with open(OUTPUT_FILE, 'w') as f:
     json.dump(data_export, f)
 
