@@ -9,56 +9,78 @@ from sklearn.metrics import euclidean_distances
 from sklearn.datasets import load_wine
 
 # ==========================================
-# 1. SETUP E CONFIGURAZIONE
+# 1. SETUP & CONFIGURATION
 # ==========================================
+# Get the absolute path of the current script directory
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# Define paths for input dataset and output JSON
 OUTPUT_FILE = os.path.abspath(os.path.join(SCRIPT_DIR, '../../dataset/firstExperiment.json'))
 CSV_FILENAME = os.path.abspath(os.path.join(SCRIPT_DIR, '../../dataset/wine.csv'))
-TARGET_COLUMN = 'Producer'
 
-K_NEIGHBORS = 10 # Il numero di "veri amici" da considerare per i FP/FN
+# Hyperparameters for K-NN topology analysis
+TARGET_COLUMN = 'Producer'
+K_NEIGHBORS = 10 
+TOLERANCE = 80  
 
 # ==========================================
-# 2. CARICAMENTO DATI
+# 2. DATA LOADING & PREPROCESSING
 # ==========================================
 try:
+    # Attempt to load local CSV dataset
     df = pd.read_csv(CSV_FILENAME)
     df = df.dropna()
     if TARGET_COLUMN in df.columns:
-        class_names = ["Class " + c for c in df[TARGET_COLUMN].astype(str).values]
+        class_names = ["Class " + str(c) for c in df[TARGET_COLUMN].values]
         data_df = df.drop(columns=[TARGET_COLUMN])
     else:
         class_names = ["Item " + str(i) for i in range(len(df))]
         data_df = df
 except FileNotFoundError:
-    print("Dataset non trovato. Uso fallback...")
+    # Fallback to Scikit-learn Wine dataset if CSV is missing
+    print("Dataset not found. Using sklearn fallback...")
     wine = load_wine()
     data_df = pd.DataFrame(wine.data, columns=wine.feature_names)
     class_names = ["Class " + str(c) for c in wine.target]
 
+# Feature extraction and scaling
 X = data_df.select_dtypes(include=[np.number]).values
 N = X.shape[0]
-X_scaled = StandardScaler().fit_transform(X)
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
 
 # ==========================================
-# 3. PROIEZIONI
+# 3. DIMENSIONALITY REDUCTION (PROJECTIONS)
 # ==========================================
+# Principal Component Analysis (Linear)
 pca = PCA(n_components=2, random_state=42)
 X_pca = pca.fit_transform(X_scaled)
-X_pca[:, 0] = -X_pca[:, 0]
+X_pca[:, 0] = -X_pca[:, 0] # Flip axis for better visualization consistency
 
-mds = MDS(n_components=2, dissimilarity='euclidean', random_state=42, normalized_stress='auto', n_init=4, max_iter=300)
+# Multidimensional Scaling (Non-linear)
+mds = MDS(
+    n_components=2, 
+    dissimilarity='euclidean', 
+    random_state=42, 
+    normalized_stress='auto', 
+    n_init=4, 
+    max_iter=300
+)
 X_mds = mds.fit_transform(X_scaled)
 
 # ==========================================
-# 4. LA MATEMATICA CORRETTA: RANGHI K-NN
+# 4. TOPOLOGICAL DISTORTION ANALYSIS (K-NN)
 # ==========================================
 def calculate_knn_distortion(D_high, D_low, K):
+    """
+    Calculates False Positives (Intrusions) and False Negatives (Extrusions)
+    based on K-NN rank differences between high and low dimensional spaces.
+    """
     N = D_high.shape[0]
+    # Set diagonal to infinity to ignore self-distance in ranking
     np.fill_diagonal(D_high, np.inf)
     np.fill_diagonal(D_low, np.inf)
 
-    # Trasforma le distanze in classifiche (0 = più vicino, N-1 = più lontano)
+    # Convert distances to rank matrices (0 = closest, N-1 = furthest)
     R_high = np.argsort(np.argsort(D_high, axis=1), axis=1)
     R_low = np.argsort(np.argsort(D_low, axis=1), axis=1)
 
@@ -66,42 +88,40 @@ def calculate_knn_distortion(D_high, D_low, K):
     score_fn = np.zeros(N)
 
     for i in range(N):
-        # Chi sono i K vicini reali e quelli apparenti?
+        # Identify K-nearest neighbors in both spaces
         U_i = set(np.where(R_high[i] < K)[0])
         V_i = set(np.where(R_low[i] < K)[0])
 
-        # Falsi Positivi (Intrusioni): Sono tra i K nel 2D, ma non in R13
+        # False Positives: Neighbors in 2D that were far in High-D (Intrusions)
         fp_indices = list(V_i - U_i)
         if fp_indices:
             score_fp[i] = np.sum(R_high[i, fp_indices] - K)
 
-        # Falsi Negativi (Estrusioni): Erano tra i K in R13, ma sono spariti nel 2D
+        # False Negatives: Neighbors in High-D that were lost in 2D (Extrusions)
         fn_indices = list(U_i - V_i)
         if fn_indices:
             score_fn[i] = np.sum(R_low[i, fn_indices] - K)
 
-    # Punteggio Netto: Positivo = FP dominanti (Blu), Negativo = FN dominanti (Rosso)
+    # Net Score: Positive values = Intrusions (Blue), Negative = Extrusions (Red)
     point_scores = score_fp - score_fn
-    global_score = np.sum(score_fp) + np.sum(score_fn)
+    total_distortion = np.sum(score_fp) + np.sum(score_fn)
     
-    return point_scores, global_score
+    return point_scores, total_distortion
 
+# Compute distance matrices and topological scores
 D_high = euclidean_distances(X_scaled)
 score_pca, global_pca = calculate_knn_distortion(D_high.copy(), euclidean_distances(X_pca), K_NEIGHBORS)
 score_mds, global_mds = calculate_knn_distortion(D_high.copy(), euclidean_distances(X_mds), K_NEIGHBORS)
 
-# Assessment: Punti con 0 errori topologici nei primi K vicini
-# Assessment: Punti con un errore topologico accettabile (Tolleranza)
-TOLERANCE = 10  # Puoi alzare o abbassare questo valore (es. tra 5 e 15)
-
+# Percentage of points within the acceptable topological error tolerance
 pca_matches = np.sum(np.abs(score_pca) <= TOLERANCE) / N * 100
 mds_matches = np.sum(np.abs(score_mds) <= TOLERANCE) / N * 100
 
-# Trova i veri vicini in R13 per il frontend (le linee)
+# Identify the top 5 real neighbors in High-D for frontend visualization
 neighbors_R13 = np.argsort(D_high, axis=1)[:, 0:5].tolist()
 
 # ==========================================
-# 5. ESPORTAZIONE
+# 5. DATA EXPORT
 # ==========================================
 export_data = {
     "stats": {
@@ -113,6 +133,7 @@ export_data = {
     "points": []
 }
 
+# Construct JSON structure for each data point
 for i in range(N):
     export_data["points"].append({
         "id": i,
@@ -126,7 +147,9 @@ for i in range(N):
         "neighbors": neighbors_R13[i]
     })
 
+# Ensure directory exists and write JSON file
 os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
 with open(OUTPUT_FILE, 'w') as f:
     json.dump(export_data, f, indent=4)
-print(f"Esportazione K-NN completata in {OUTPUT_FILE}")
+
+print(f"K-NN Export successfully completed: {OUTPUT_FILE}")
