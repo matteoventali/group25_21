@@ -15,12 +15,12 @@ const customTableau = [...d3.schemeTableau10];
 customTableau[2] = '#2ca02c'; // Sostituisce il rosso (#e15759) con un verde standard.
 const colorOriginal = d3.scaleOrdinal(customTableau);
 
-// Precision (Blues): Scala migliorata e più intuitiva. 0 (Poco preciso) = Azzurro chiaro -> 1 (Molto preciso) = Blu scuro.
-const bluesDiscrete = ["#eff3ff", "#bdd7e7", "#6baed6", "#3182bd", "#08519c"];
+// Precision (Blues): Scala invertita. 0 (Poco preciso) = Blu scuro -> 1 (Molto preciso) = Azzurro chiaro.
+const bluesDiscrete = ["#08519c", "#3182bd", "#6baed6", "#bdd7e7", "#eff3ff"];
 const colorPrecision = d3.scaleQuantize().domain([0, 1]).range(bluesDiscrete); 
 
-// Recall (Reds): Scala migliorata e più intuitiva. 0 (Poco coeso) = Rosa chiaro -> 1 (Molto coeso) = Rosso scuro.
-const redsDiscrete = ["#fee5d9", "#fcae91", "#fb6a4a", "#de2d26", "#a50f15"];
+// Recall (Reds): Scala invertita. 0 (Poco coeso) = Rosso scuro -> 1 (Molto coeso) = Rosa chiaro.
+const redsDiscrete = ["#a50f15", "#de2d26", "#fb6a4a", "#fcae91", "#fee5d9"];
 const colorRecall = d3.scaleQuantize().domain([0, 1]).range(redsDiscrete);
 
 // F-Score (Red-Yellow-Green): Scala più intuitiva. 0 (Pessimo) = Rosso, 0.5 = Giallo, 1 (Ottimo) = Verde.
@@ -83,6 +83,8 @@ d3.json("../json/step2_final_data.json?v=" + Date.now()).then(data => {
     initGauge("#gauge-precision", gauges.precision);
     initGauge("#gauge-recall", gauges.recall);
     initGauge("#gauge-fscore", gauges.fscore);
+
+    enhanceColorModeSwitcher();
 
     d3.selectAll("input[name='colorMode']").on("change", function() {
         colorMode = this.value;
@@ -262,6 +264,41 @@ function resetAllHovers() {
         .attr("stroke", "rgba(0,0,0,0.4)")
         .attr("stroke-width", 0.8);
     hideTooltip();
+}
+
+// --- UI HELPERS ---
+
+/**
+ * Trasforma i radio button di base per la selezione del colore in uno switch moderno.
+ * Trova il contenitore, lo svuota, e inietta la nuova struttura HTML.
+ * Questo approccio non richiede modifiche al file HTML principale.
+ */
+function enhanceColorModeSwitcher() {
+    const options = [
+        { value: 'original', label: 'Original' },
+        { value: 'precision', label: 'Precision' },
+        { value: 'recall', label: 'Recall' },
+        { value: 'fscore', label: 'F-Score' }
+    ];
+
+    // Assumiamo che i radio button originali siano in un div con classe "control-group"
+    const container = d3.select(".control-group");
+    if (container.empty()) { return; }
+    container.html(""); // Pulisce il contenuto esistente (i vecchi radio button)
+
+    // Trasforma il vecchio div nel nuovo componente
+    container.classed("control-group", false).classed("segmented-control", true);
+
+    options.forEach((opt, i) => {
+        container.append("input")
+            .attr("type", "radio")
+            .attr("id", `cm-${opt.value}`)
+            .attr("name", "colorMode")
+            .attr("value", opt.value)
+            .property("checked", i === 0); // Seleziona 'Original' di default
+
+        container.append("label").attr("for", `cm-${opt.value}`).text(opt.label);
+    });
 }
 
 // --- COLOR SCALES & LEGEND ---
