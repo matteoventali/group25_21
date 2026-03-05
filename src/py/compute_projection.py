@@ -2,7 +2,7 @@ import os
 import json
 import pandas as pd
 from sklearn.decomposition import PCA
-from sklearn.manifold import MDS
+from sklearn.manifold import MDS, trustworthiness
 from sklearn.preprocessing import StandardScaler
 
 # --- PATH CONFIGURATION ---
@@ -12,59 +12,66 @@ INPUT_JSON = os.path.join(BASE_DIR, '..', 'json', 'step1_results.json')
 OUTPUT_JSON = os.path.join(BASE_DIR, '..', 'json', 'step2_final_data.json')
 
 def run_projections():
-    # 1. Load the original dataset
     print(f"Loading dataset from: {DATASET_PATH}")
     df = pd.read_csv(DATASET_PATH)
-    
-    # The label is the 'producer' (the first column).
-    # We only need the features (all columns except the first) to perform the projections.
     X = df.iloc[:, 1:].values
     
-    # Standardize the features (Zero mean, Unit variance)
-    # Crucial for PCA and distance-based MDS to avoid scale dominance by features with large numbers (e.g., Proline)
-    print("Standardizing features...")
+    print("Standardizing features for unbiased projection...")
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    # 2. Perform PCA (Principal Component Analysis)
-    print("Running PCA projection (2 components)...")
-    # Using random_state for reproducibility
+    print("Executing PCA (2 components)...")
     pca = PCA(n_components=2, random_state=42)
     pca_coords = pca.fit_transform(X_scaled)
 
-    # 3. Perform Euclidean MDS (Multidimensional Scaling)
-    print("Running Euclidean MDS projection (2 components)...")
-    # 'euclidean' is the default dissimilarity for sklearn's MDS
+    print("Executing Euclidean MDS (2 components)...")
     mds = MDS(n_components=2, dissimilarity='euclidean', random_state=42, normalized_stress='auto')
     mds_coords = mds.fit_transform(X_scaled)
 
-    # 4. Load Step 1 JSON data (Relationship metrics)
-    print(f"Loading relationship metrics from: {INPUT_JSON}")
+    print(f"Loading relational metrics from: {INPUT_JSON}")
     if not os.path.exists(INPUT_JSON):
-        raise FileNotFoundError(f"Run step1_relationships.py first. File not found: {INPUT_JSON}")
+        raise FileNotFoundError(f"Missing input! Please run compute_relationship.py first.")
         
     with open(INPUT_JSON, 'r') as f:
         data = json.load(f)
 
-    # 5. Inject 2D coordinates into the JSON structure
-    print("Injecting 2D coordinates into the JSON data...")
+    # --- CALCULATE TRUSTWORTHINESS & CONTINUITY ---
+    print("Calculating Global Trustworthiness and Continuity...")
+    k = data["metadata"]["k_neighbors_used"]
+    k_val = int(k) if str(k).isdigit() else 15
+
+    # Trustworthiness: measures False Positives (HD is ground truth)
+    pca_trust = trustworthiness(X_scaled, pca_coords, n_neighbors=k_val)
+    mds_trust = trustworthiness(X_scaled, mds_coords, n_neighbors=k_val)
+    
+    # Continuity: measures False Negatives (Swapping inputs computes continuity)
+    pca_cont = trustworthiness(pca_coords, X_scaled, n_neighbors=k_val)
+    mds_cont = trustworthiness(mds_coords, X_scaled, n_neighbors=k_val)
+
+    # Inject static global analytics
+    data["metadata"]["global_assessment"]["pca"] = {
+        "trustworthiness": round(pca_trust, 4),
+        "continuity": round(pca_cont, 4)
+    }
+    data["metadata"]["global_assessment"]["mds"] = {
+        "trustworthiness": round(mds_trust, 4),
+        "continuity": round(mds_cont, 4)
+    }
+
+    # Inject coordinates
+    print("Fusing projections with relational metrics...")
     for i, point in enumerate(data["points"]):
-        # Add PCA coordinates
         point["pca_x"] = round(float(pca_coords[i, 0]), 4)
         point["pca_y"] = round(float(pca_coords[i, 1]), 4)
-        
-        # Add MDS coordinates
         point["mds_x"] = round(float(mds_coords[i, 0]), 4)
         point["mds_y"] = round(float(mds_coords[i, 1]), 4)
 
-    # Update metadata to reflect that mapping phase is complete
     data["metadata"]["projections_included"] = ["PCA", "Euclidean MDS"]
 
-    # 6. Save the final integrated JSON
     with open(OUTPUT_JSON, 'w') as f:
         json.dump(data, f, indent=4)
         
-    print(f"Process completed successfully! Final payload saved to: {OUTPUT_JSON}")
+    print(f"Success! Final visual analytics payload saved to: {OUTPUT_JSON}")
 
 if __name__ == "__main__":
     run_projections()

@@ -15,30 +15,43 @@
                 <h1>Dimensionality Reduction Quality</h1>
                 <p class="subtitle">Comparing PCA and Euclidean MDS via Relationship Metrics</p>
             </div>
-            <div id="global-assessment" class="assessment-box"></div>
+            
+            <div class="header-stats">
+                <div id="global-assessment" class="assessment-box"></div>
+                
+                <div class="projection-metrics">
+                    <div class="proj-metric-col">
+                        <strong>PCA Global</strong>
+                        <span>Trust: <span id="val-pca-trust">0%</span></span>
+                        <span>Cont: <span id="val-pca-cont">0%</span></span>
+                    </div>
+                    <div class="proj-metric-col">
+                        <strong>MDS Global</strong>
+                        <span>Trust: <span id="val-mds-trust">0%</span></span>
+                        <span>Cont: <span id="val-mds-cont">0%</span></span>
+                    </div>
+                </div>
+            </div>
         </header>
 
-        <aside class="left-panel">
-            <h3>Color Scale</h3>
-            <p class="help-text">Select a discrete metric to color the points.</p>
-            
-            <div class="control-group">
-                <label><input type="radio" name="colorMode" value="original" checked> Original Labels</label>
-                <label><input type="radio" name="colorMode" value="precision"> Precision (5-class Blues)</label>
-                <label><input type="radio" name="colorMode" value="recall"> Recall (5-class Reds)</label>
-                <label><input type="radio" name="colorMode" value="fscore"> F-Score (5-class RdYlGn)</label>
-            </div>
-
-            <div id="legend-container">
-                <h4>Legend</h4>
-                <div id="legend-gradient"></div>
-                <div class="legend-labels">
-                    <span id="legend-min">Min</span>
-                    <span id="legend-max">Max</span>
+        <section class="top-controls">
+            <div class="controls-left">
+                <span class="control-label"><strong>Color Scale:</strong></span>
+                <div class="control-group">
+                    <label><input type="radio" name="colorMode" value="original" checked> Original Labels</label>
+                    <label><input type="radio" name="colorMode" value="precision"> Precision (Blues)</label>
+                    <label><input type="radio" name="colorMode" value="recall"> Recall (Reds)</label>
+                    <label><input type="radio" name="colorMode" value="fscore"> F-Score (RdYlGn)</label>
                 </div>
-                <p id="legend-description" class="help-text">Colors map to class labels.</p>
             </div>
-        </aside>
+            <div class="controls-right" id="legend-container">
+                <div id="legend-gradient"></div>
+                <div class="legend-labels" id="legend-labels">
+                    <span id="legend-min"></span>
+                    <span id="legend-max"></span>
+                </div>
+            </div>
+        </section>
 
         <main class="main-stage">
             <div class="plot-container">
@@ -57,19 +70,28 @@
             
             <div id="brush-stats" class="hidden">
                 <div class="stat-card">
-                    <h4>Selection Size</h4>
+                    <h4>Selected Points</h4>
                     <p class="big-number" id="stat-count">0</p>
                 </div>
                 
-                <div class="gauge-container">
-                    <h4>Avg F-Score</h4>
-                    <svg id="gauge-chart" width="160" height="100"></svg>
-                    <div id="gauge-value" class="gauge-label">0.000</div>
-                </div>
+                <div class="gauges-wrapper">
+                    <div class="gauge-container">
+                        <h4>Precision</h4>
+                        <svg id="gauge-precision"></svg>
+                        <div id="val-precision" class="gauge-label">0%</div>
+                    </div>
 
-                <div class="stat-details">
-                    <p><strong>Avg Precision:</strong> <span id="stat-precision">0</span></p>
-                    <p><strong>Avg Recall:</strong> <span id="stat-recall">0</span></p>
+                    <div class="gauge-container">
+                        <h4>Recall</h4>
+                        <svg id="gauge-recall"></svg>
+                        <div id="val-recall" class="gauge-label">0%</div>
+                    </div>
+
+                    <div class="gauge-container">
+                        <h4>F-Score</h4>
+                        <svg id="gauge-fscore"></svg>
+                        <div id="val-fscore" class="gauge-label">0%</div>
+                    </div>
                 </div>
             </div>
         </aside>
