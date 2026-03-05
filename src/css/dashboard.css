@@ -2,7 +2,7 @@
    RESET E IMPOSTAZIONI GLOBALI
    ========================================= */
 * { box-sizing: border-box; }
-body { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; color: #333; }
+body { margin: 0; padding: 0; width: 100%; min-height: 100vh; overflow-x: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; color: #333; }
 
 /* =========================================
    LAYOUT PRINCIPALE (CSS GRID)
@@ -16,7 +16,7 @@ body { margin: 0; padding: 0; width: 100vw; height: 100vh; overflow: hidden; fon
         "controls analytics"
         "main analytics";
     height: 100vh; 
-    width: 100vw; 
+    width: 100%; 
 }
 
 /* =========================================
@@ -124,9 +124,65 @@ svg { width: 100%; height: 100%; display: block; }
 .gauge-container h4 { margin: 0 0 10px 0; color: #2c3e50; font-size: 0.8rem; text-transform: uppercase; }
 .gauge-label { font-size: 1.1rem; font-weight: bold; margin-top: 5px; color: #2980b9; }
 
+/* --- Neighbor Graph (Right Panel) --- */
+#neighbor-graph-svg {
+    width: 100%;
+    height: 320px; /* Fixed height for the graph */
+    border: 1px solid #f0f0f0;
+    border-radius: 8px;
+    background: #fcfcfc;
+}
+.neighbor-link {
+    stroke: #999;
+    stroke-opacity: 0.6;
+}
+.neighbor-node circle {
+    stroke: #fff;
+    stroke-width: 2px;
+    cursor: pointer;
+}
+.neighbor-node.center circle {
+    stroke: #f1c40f; /* Highlight the central node */
+    stroke-width: 4px;
+}
+
 /* =========================================
    TOOLTIP
    ========================================= */
 #tooltip { position: absolute; opacity: 0; background: rgba(30, 40, 50, 0.95); color: white; padding: 12px; border-radius: 6px; pointer-events: none; font-size: 0.85rem; line-height: 1.5; z-index: 1000; box-shadow: 0 4px 8px rgba(0,0,0,0.2); transition: opacity 0.1s ease; border-left: 4px solid #f1c40f; }
 #tooltip strong { color: #f1c40f; }
 .tt-diagnosis { margin-top: 8px; padding-top: 8px; border-top: 1px solid #555; font-style: italic; color: #ecf0f1; }
+
+/* =========================================
+   RESPONSIVE LAYOUT (per schermi più piccoli)
+   ========================================= */
+@media (max-width: 1280px) {
+    #app-grid {
+        grid-template-columns: 1fr; /* Colonna singola */
+        grid-template-rows: auto auto 1fr auto; /* Adatta le righe per lo stacking */
+        grid-template-areas:
+            "header"
+            "controls"
+            "main"
+            "analytics";
+        height: auto; /* L'altezza si adatta al contenuto */
+        min-height: 100vh;
+    }
+
+    .right-panel {
+        border-left: none; /* Rimuove il bordo laterale */
+        border-top: 2px solid #ddd; /* Aggiunge un separatore in alto */
+        overflow-y: visible; /* Disabilita lo scroll interno al pannello */
+        padding-top: 25px;
+    }
+
+    .main-stage {
+        flex-direction: column; /* Impila i grafici verticalmente */
+    }
+
+    .top-controls {
+        flex-direction: column; /* Impila i controlli */
+        align-items: flex-start; /* Allinea a sinistra */
+        gap: 15px;
+    }
+}

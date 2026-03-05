@@ -36,11 +36,22 @@ const gauges = {
 const gaugeAngleScale = d3.scaleLinear().domain([0, 1]).range([-Math.PI / 2, Math.PI / 2]);
 
 // --- INITIALIZATION ---
-d3.json("../json/step2_final_data.json?v=" + Date.now()).then(data => {
+Promise.all([
+    d3.json("../json/step2_final_data.json?v=" + Date.now()),
+    d3.csv("../../dataset/wine.csv")
+]).then(([data, wineData]) => {
+    // Merge attributes from CSV into the main dataset
+    data.points.forEach((p, i) => {
+        if (wineData[i]) {
+            p.attributes = wineData[i];
+        }
+    });
+
     dataset = data.points;
     metadata = data.metadata;
     uniqueClasses = Array.from(new Set(dataset.map(d => d.label))).sort();
     pointById = new Map(dataset.map(p => [p.id, p]));
+
 
     // 1. Inject Global Assessment
     d3.select("#global-assessment").html(`
@@ -75,6 +86,16 @@ d3.json("../json/step2_final_data.json?v=" + Date.now()).then(data => {
             </div>
         `);
     }
+
+    // 3. Aggiungi contenitore per il grafo dei vicini (inizialmente nascosto)
+    d3.select(".right-panel").append("div")
+        .attr("id", "neighbor-graph-container")
+        .attr("class", "hidden")
+        .html(`
+            <h3 style="margin-top: 25px; border-top: 1px solid #eee; padding-top: 20px;">Neighbor Graph</h3>
+            <p class="help-text">Graph of the selected point and its k-nearest neighbors from the original high-dimensional space.</p>
+            <svg id="neighbor-graph-svg"></svg>
+        `);
 
     drawPlot("#pca-plot", "pca_x", "pca_y", "pca", brushPCA);
     drawPlot("#mds-plot", "mds_x", "mds_y", "mds", brushMDS);
@@ -114,16 +135,32 @@ function drawPlot(containerSelector, xKey, yKey, plotId, brushObj) {
     // l'evento "mouseout" del cerchio potrebbe non attivarsi. Questo garantisce il reset.
     svgRoot.on("mouseleave", resetAllHovers);
 
-    const svg = svgRoot.append("g")
-        .attr("transform", `translate(${margin.left},${margin.top})`);
+    // Aggiungo un click sullo sfondo per resettare tutte le selezioni
+    svgRoot.on("click", () => {
+        d3.selectAll("circle.dot").attr("opacity", 0.9);
+        d3.selectAll(".link-group line").remove();
+        d3.select("#neighbor-graph-container").classed("hidden", true);
+        d3.select("#brush-stats").classed("hidden", true);
+        d3.select("#matrix-container").classed("hidden", true);
+        updateLiveAnalytics([]); // Resetta e nasconde i componenti di analisi
+    });
 
     const innerWidth = width - margin.left - margin.right;
     const innerHeight = height - margin.top - margin.bottom;
 
-    const xScale = d3.scaleLinear().domain(d3.extent(dataset, d => d[xKey])).nice().range([0, innerWidth]);
-    const yScale = d3.scaleLinear().domain(d3.extent(dataset, d => d[yKey])).nice().range([innerHeight, 0]);
+    // Per evitare lo stretching, creiamo un'area di plot quadrata.
+    const plotSize = Math.min(innerWidth, innerHeight);
+    const xOffset = (innerWidth - plotSize) / 2;
+    const yOffset = (innerHeight - plotSize) / 2;
 
-    svg.append("g").attr("transform", `translate(0,${innerHeight})`).call(d3.axisBottom(xScale).ticks(5));
+    // Gruppo principale traslato per centrare l'area di plot quadrata.
+    const svg = svgRoot.append("g")
+        .attr("transform", `translate(${margin.left + xOffset},${margin.top + yOffset})`);
+
+    const xScale = d3.scaleLinear().domain(d3.extent(dataset, d => d[xKey])).nice().range([0, plotSize]);
+    const yScale = d3.scaleLinear().domain(d3.extent(dataset, d => d[yKey])).nice().range([plotSize, 0]);
+
+    svg.append("g").attr("transform", `translate(0,${plotSize})`).call(d3.axisBottom(xScale).ticks(5));
     svg.append("g").call(d3.axisLeft(yScale).ticks(5));
 
     svg.append("g").attr("class", "link-group");
@@ -164,11 +201,11 @@ function drawPlot(containerSelector, xKey, yKey, plotId, brushObj) {
             resetAllHovers();
         })
         .on("click", function(event, d) {
-            event.stopPropagation(); 
+            event.stopPropagation(); // Impedisce al click sullo sfondo di attivarsi
             updateSelection(d);
         });
 
-    brushObj.extent([[0, 0], [innerWidth, innerHeight]]);
+    brushObj.extent([[0, 0], [plotSize, plotSize]]);
     brushGroup.call(brushObj);
     
     brushObj.xScale = xScale;
@@ -180,16 +217,22 @@ function updateSelection(d) {
     d3.select("#pca-plot .brush-group").call(brushPCA.move, null);
     d3.select("#mds-plot .brush-group").call(brushMDS.move, null);
 
-    const neighbors = d.neighbors || [];
-    const activeIds = new Set([d.id, ...neighbors]);
+    // Nascondi i componenti di analisi per selezioni multiple (brush)
+    d3.select("#brush-stats").classed("hidden", true);
+    d3.select(".gauges-wrapper").classed("hidden", true);
+
+    const neighborIds = d.neighbors || [];
+    const activeIds = new Set([d.id, ...neighborIds]);
 
     // Modifica opacità: isola punto cliccato e vicini (alzato a 0.15)
     d3.selectAll("circle.dot").attr("opacity", p => activeIds.has(p.id) ? 0.9 : 0.15);
 
-    drawLines("pca", d, neighbors, "pca_x", "pca_y", brushPCA);
-    drawLines("mds", d, neighbors, "mds_x", "mds_y", brushMDS);
+    // Disegna le linee di collegamento e il grafo dei vicini
+    drawLines("pca", d, neighborIds, "pca_x", "pca_y", brushPCA);
+    drawLines("mds", d, neighborIds, "mds_x", "mds_y", brushMDS);
 
-    updateLiveAnalytics([d]);
+    const neighborsData = neighborIds.map(id => pointById.get(id)).filter(Boolean);
+    drawNeighborGraph(d, neighborsData);
 }
 
 function drawLines(plotId, sourceD, neighborIds, xKey, yKey, scales) {
@@ -229,6 +272,7 @@ function setupBrushing() {
 function handleBrush(event, brushObj, xKey, yKey) {
     if (!event.sourceEvent) return;
     d3.selectAll(".link-group line").remove(); 
+    d3.select("#neighbor-graph-container").classed("hidden", true);
 
     if (!event.selection) {
         if (event.type === "end") {
@@ -236,6 +280,7 @@ function handleBrush(event, brushObj, xKey, yKey) {
             resetAllHovers(); // Rimuove anche eventuali hover rimasti attivi
             d3.select("#brush-stats").classed("hidden", true);
             d3.select("#matrix-container").classed("hidden", true);
+            updateLiveAnalytics([]); // Nasconde i tachimetri
         }
         return;
     }
@@ -378,24 +423,36 @@ function updateGauge(gaugeObj, value, color, textSelector) {
 
 function updateLiveAnalytics(selectedPoints) {
     const statsBox = d3.select("#brush-stats");
+    const gaugesWrapper = d3.select(".gauges-wrapper");
+
+    // I tachimetri e le statistiche di brush appaiono solo per selezioni > 1
+    const isMultiSelection = selectedPoints.length > 1;
+
+    statsBox.classed("hidden", !isMultiSelection);
+    gaugesWrapper.classed("hidden", !isMultiSelection);
+
     if (selectedPoints.length === 0) {
-        statsBox.classed("hidden", true);
+        // Se la selezione è vuota, resetta i gauge a 0.
+        updateGauge(gauges.precision, 0, "#bdc3c7", "#val-precision");
+        updateGauge(gauges.recall, 0, "#bdc3c7", "#val-recall");
+        updateGauge(gauges.fscore, 0, "#bdc3c7", "#val-fscore");
         return;
     }
     
-    statsBox.classed("hidden", false);
-    d3.select("#stat-count").text(selectedPoints.length);
-    
-    const avgPrec = d3.mean(selectedPoints, d => d.precision);
-    const avgRecall = d3.mean(selectedPoints, d => d.recall);
-    const avgFScore = d3.mean(selectedPoints, d => d.f_score);
+    if (isMultiSelection) {
+        d3.select("#stat-count").text(selectedPoints.length);
+        
+        const avgPrec = d3.mean(selectedPoints, d => d.precision);
+        const avgRecall = d3.mean(selectedPoints, d => d.recall);
+        const avgFScore = d3.mean(selectedPoints, d => d.f_score);
 
-    updateGauge(gauges.precision, avgPrec, colorPrecision(avgPrec), "#val-precision");
-    updateGauge(gauges.recall, avgRecall, colorRecall(avgRecall), "#val-recall");
-    updateGauge(gauges.fscore, avgFScore, colorFScore(avgFScore), "#val-fscore");
+        updateGauge(gauges.precision, avgPrec, colorPrecision(avgPrec), "#val-precision");
+        updateGauge(gauges.recall, avgRecall, colorRecall(avgRecall), "#val-recall");
+        updateGauge(gauges.fscore, avgFScore, colorFScore(avgFScore), "#val-fscore");
+    }
 }
 
-// --- TOOLTIP CON DIAGNOSI FP/FN IN INGLESE ---
+// --- TOOLTIPS ---
 function showTooltip(event, d) {
     const tooltip = d3.select("#tooltip");
     
@@ -437,4 +494,125 @@ function showTooltip(event, d) {
 
 function hideTooltip() {
     d3.select("#tooltip").transition().duration(200).style("opacity", 0);
+}
+
+function showAttributeTooltip(event, d) {
+    const tooltip = d3.select("#tooltip");
+
+    if (!d.attributes) {
+        return showTooltip(event, d); // Fallback se gli attributi non sono caricati
+    }
+
+    // Costruisce una stringa HTML con tutti gli attributi del vino
+    const attributesHtml = Object.entries(d.attributes)
+        .map(([key, value]) => `<strong>${key.replace(/_/g, ' ')}:</strong> ${value}`)
+        .join('<br>');
+
+    tooltip.html(attributesHtml);
+
+    const tooltipNode = tooltip.node();
+    const tooltipWidth = tooltipNode.offsetWidth;
+    const tooltipHeight = tooltipNode.offsetHeight;
+    const margin = 20;
+
+    let x = event.pageX + margin;
+    if (x + tooltipWidth > window.innerWidth) { x = event.pageX - tooltipWidth - margin; }
+    let y = event.pageY + margin;
+    if (y + tooltipHeight > window.innerHeight) { y = event.pageY - tooltipHeight - margin; }
+
+    tooltip.style("left", x + "px").style("top", y + "px").transition().duration(100).style("opacity", 1);
+}
+
+// --- NEIGHBOR GRAPH (FORCE-DIRECTED) ---
+
+/**
+ * Disegna il grafo dei vicini nel pannello di destra.
+ * @param {object} centerNode Il punto selezionato al centro.
+ * @param {Array<object>} neighborNodes I suoi vicini.
+ */
+function drawNeighborGraph(centerNode, neighborNodes) {
+    const container = d3.select("#neighbor-graph-container");
+    container.classed("hidden", false);
+
+    const svg = d3.select("#neighbor-graph-svg");
+    svg.selectAll("*").remove();
+
+    const width = svg.node().getBoundingClientRect().width;
+    const height = svg.node().getBoundingClientRect().height;
+
+    // Crea un'area di disegno quadrata al centro per evitare lo stretching del layout
+    const size = Math.min(width, height);
+    const xOffset = (width - size) / 2;
+    const yOffset = (height - size) / 2;
+    const g = svg.append("g").attr("transform", `translate(${xOffset}, ${yOffset})`);
+
+    const graphNodes = [centerNode, ...neighborNodes].map(n => ({...n}));
+    const graphLinks = neighborNodes.map(n => ({
+        source: centerNode.id,
+        target: n.id
+        // NOTA: la distanza (peso) non è presente nel dataset, quindi non può essere mostrata.
+    }));
+
+    const centerGraphNode = graphNodes.find(n => n.id === centerNode.id);
+    if (centerGraphNode) {
+        centerGraphNode.fx = size / 2;
+        centerGraphNode.fy = size / 2;
+    }
+
+    const simulation = d3.forceSimulation(graphNodes)
+        .force("link", d3.forceLink(graphLinks).id(d => d.id).distance(size / 3.5).strength(0.7))
+        .force("charge", d3.forceManyBody().strength(-size * 1.8))
+        .force("center", d3.forceCenter(size / 2, size / 2));
+
+    const link = g.append("g")
+        .selectAll("line")
+        .data(graphLinks)
+        .join("line")
+        .attr("class", "neighbor-link");
+
+    const node = g.append("g")
+        .selectAll("g")
+        .data(graphNodes)
+        .join("g")
+        .attr("class", d => d.id === centerNode.id ? "neighbor-node center" : "neighbor-node")
+        .on("mouseover", showAttributeTooltip) // Usa il nuovo tooltip con gli attributi
+        .on("mouseout", hideTooltip)
+        .call(drag(simulation, centerNode, size));
+
+    node.append("circle")
+        .attr("r", d => d.id === centerNode.id ? 20 : 15)
+        .attr("fill", d => colorOriginal(d.label));
+
+    simulation.on("tick", () => {
+        link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+            .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+        node.attr("transform", d => `translate(${d.x},${d.y})`);
+    });
+}
+
+/**
+ * Helper per abilitare il trascinamento dei nodi nel grafo.
+ * @param {object} simulation La simulazione D3.
+ * @param {object} centerNode Il nodo centrale che deve rimanere fisso.
+ * @param {number} size La dimensione dell'area di disegno per i limiti.
+ */
+function drag(simulation, centerNode, size) {
+    function dragstarted(event, d) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
+    }
+    function dragged(event, d) {
+        // Blocca i nodi all'interno dell'area di disegno
+        d.fx = Math.max(0, Math.min(size, event.x));
+        d.fy = Math.max(0, Math.min(size, event.y));
+    }
+    function dragended(event, d) {
+        if (!event.active) simulation.alphaTarget(0);
+        if (d.id !== centerNode.id) { // Non rilasciare la posizione fissa del nodo centrale
+            d.fx = null;
+            d.fy = null;
+        }
+    }
+    return d3.drag().on("start", dragstarted).on("drag", dragged).on("end", dragended);
 }
